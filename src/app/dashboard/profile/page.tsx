@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   User, Mail, Globe, GraduationCap, Calendar, 
   BookOpen, Layers, Save, Lock, ArrowLeft,
-  CheckCircle2, AlertCircle, Camera
+  CheckCircle2, AlertCircle, Camera, LogOut
 } from "lucide-react";
 
 import { Select } from "@/components/ui/Select";
@@ -209,6 +209,11 @@ export default function ProfilePage() {
     setIsSaving(false);
   };
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push("/auth/login");
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -323,6 +328,16 @@ export default function ProfilePage() {
                   <Camera className="w-4 h-4 mr-2 group-hover:scale-110 transition-transform" />
                   CHANGE PHOTO
                 </Button>
+
+                <div className="mt-8 pt-8 border-t border-white/5">
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-red-500/5 hover:bg-red-500/10 text-red-400 border border-red-500/10 transition-all group font-black text-[10px] tracking-[0.2em]"
+                  >
+                    <LogOut className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                    SIGN OUT
+                  </button>
+                </div>
               </Card>
             </motion.div>
 

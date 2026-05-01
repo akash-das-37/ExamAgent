@@ -75,8 +75,53 @@ export function DashboardNavbar() {
               </div>
             </div>
           </Link>
+
+          <div className="relative">
+            <button 
+              onClick={() => setIsOpen(!isOpen)}
+              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/40 hover:text-white"
+            >
+              <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            <AnimatePresence>
+              {isOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute right-0 mt-4 w-48 rounded-2xl bg-[#121214] border border-white/10 p-2 shadow-2xl backdrop-blur-xl z-[100]"
+                >
+                  <button
+                    onClick={() => {
+                      setIsOpen(false);
+                      router.push("/dashboard/profile");
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition-colors text-sm font-medium"
+                  >
+                    <User className="w-4 h-4 text-accent-blue" />
+                    My Profile
+                  </button>
+                  <div className="h-[1px] bg-white/5 my-1" />
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 transition-colors text-sm font-medium text-red-400"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Sign Out
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
+      {isOpen && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setIsOpen(false)}
+        />
+      )}
     </nav>
   );
 }
