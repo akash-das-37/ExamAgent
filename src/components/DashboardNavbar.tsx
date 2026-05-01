@@ -28,6 +28,7 @@ export function DashboardNavbar() {
           setProfile({
             ...data,
             fullName: user.user_metadata.full_name || "Student",
+            avatarUrl: user.user_metadata.avatar_url || null,
           });
         }
       }
@@ -61,11 +62,16 @@ export function DashboardNavbar() {
           <Link href="/dashboard/profile">
             <div className="flex items-center gap-4 group cursor-pointer hover:bg-white/5 p-2 rounded-xl transition-colors">
               <div className="text-right hidden sm:block">
-                <p className="text-sm font-semibold">{profile?.fullName || "Loading..."}</p>
-                <p className="text-xs text-white/40">{profile?.course || "..."} • {profile?.stream || "..."}</p>
+                <p className="text-sm font-bold tracking-tight">{profile?.fullName || "Loading..."}</p>
+                <p className="text-[10px] uppercase tracking-widest text-white/30 font-black">{profile?.course || "..."} • {profile?.stream || "..."}</p>
               </div>
-              <div className="w-12 h-12 rounded-full glass border border-white/10 flex items-center justify-center group-hover:border-accent-purple/50 transition-all overflow-hidden bg-white/5 shadow-inner">
-                <User className="w-6 h-6 text-white/60" />
+              <div className="w-12 h-12 rounded-full border-2 border-white/5 flex items-center justify-center group-hover:border-accent-purple/50 transition-all overflow-hidden bg-white/5 relative">
+                {profile?.avatarUrl ? (
+                  <img src={profile.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <User className="w-6 h-6 text-white/20 group-hover:text-white/60 transition-colors" />
+                )}
+                <div className="absolute inset-0 bg-accent-purple/10 opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
           </Link>
