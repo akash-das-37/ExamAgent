@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0b;
+  --color-foreground: #e5e2e3;
+  --color-surface: #131314;
+  --color-surface-container: #201f20;
+  --color-primary: #ddb7ff;
+  --color-secondary: #adc6ff;
+  --color-tertiary: #2fd9f4;
+  --color-accent-purple: #a855f7;
+  --color-accent-blue: #3b82f6;
+  --color-accent-cyan: #22d3ee;
+  
+  --font-sans: "Inter", var(--font-geist-sans);
+  
+  --radius-glass: 1rem;
+}
+
+:root {
+  --background: #0a0a0b;
+  --foreground: #e5e2e3;
+  --primary-gradient: linear-gradient(45deg, #a855f7, #3b82f6, #22d3ee);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Glassmorphism utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-morphism {
+  background: rgba(19, 19, 20, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.neon-glow {
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);
+}
+
+.neon-border {
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  transition: all 0.3s ease;
+}
+
+.neon-border:focus-within {
+  border-color: #a855f7;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+}
+
+/* Animations */
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
