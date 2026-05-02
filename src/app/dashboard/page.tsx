@@ -1,11 +1,11 @@
 "use client";
-
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { DashboardNavbar } from "@/components/DashboardNavbar";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { motion } from "framer-motion";
+import { createClient } from "@/lib/supabase";
 import { 
   Clock, 
   Target, 
@@ -19,6 +19,20 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
+  const [userName, setUserName] = useState("Student");
+  const supabase = createClient();
+
+  useEffect(() => {
+    async function getUser() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.user_metadata?.full_name) {
+        const firstName = user.user_metadata.full_name.split(' ')[0];
+        setUserName(firstName);
+      }
+    }
+    getUser();
+  }, []);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <DashboardNavbar />
@@ -64,7 +78,7 @@ export default function DashboardPage() {
 
             <div className="flex-1 text-center md:text-left space-y-4">
               <div>
-                <h1 className="text-2xl font-bold mb-1">Hello, Akash! 👋</h1>
+                <h1 className="text-2xl font-bold mb-1">Hello, {userName}! 👋</h1>
                 <p className="text-white/40 font-light">Your Operating Systems exam is in <span className="text-accent-purple font-medium">4 days</span>. You're ahead of 80% of your class.</p>
               </div>
               <div className="flex flex-wrap justify-center md:justify-start gap-4">
@@ -230,7 +244,7 @@ export default function DashboardPage() {
               </h3>
               <div className="space-y-3 mb-4">
                 <div className="bg-white/5 p-3 rounded-xl rounded-bl-none text-xs text-white/60">
-                  Hey Akash! I noticed you struggled with LRU Algorithm yesterday. Want a quick 2-min visual summary?
+                  Hey {userName}! I noticed you struggled with LRU Algorithm yesterday. Want a quick 2-min visual summary?
                 </div>
               </div>
               <div className="flex gap-2">
