@@ -12,9 +12,9 @@ import {
   type PriorityTopic, type StudyPlanItem
 } from "@/hooks/useRealtimeData";
 import {
-  Clock, Target, BarChart3, Sparkles, Flame, ChevronRight,
+  Clock, Target, BarChart3, Sparkles, Flame, ChevronRight, ChevronDown,
   MessageCircle, TrendingUp, FileText, Upload, Loader2, CheckCircle2,
-  LayoutDashboard, BookOpen
+  LayoutDashboard, BookOpen, AlertTriangle
 } from "lucide-react";
 
 const sidebarItems = [
@@ -31,14 +31,18 @@ export default function DashboardPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [toast, setToast] = useState<{ type: string; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const syllabusFileRef = useRef<HTMLInputElement>(null);
+  const [isSyllabusUploading, setIsSyllabusUploading] = useState(false);
+  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
   const supabase = createClient();
 
-  const { data: topics, loading: topicsLoading } = usePriorityTopics();
+  const { data: topics, loading: topicsLoading, refetch: refetchTopics } = usePriorityTopics();
   const { data: planItems, loading: planLoading } = useStudyPlan();
   const { data: files, loading: filesLoading } = useUploadedFiles();
   const { data: exams } = useExams();
   const { data: sessions } = useStudySessions(7);
 
+  const hasPyq = files.some(f => f.file_type === "pyq" || f.file_type === "PYQ");
   const readiness = calculateReadiness(topics);
   const countdown = getNextExamCountdown(exams);
   const dailyProgress = aggregateDailyProgress(sessions, 7);
@@ -111,6 +115,89 @@ export default function DashboardPage() {
   const handleToggleStatus = async (item: StudyPlanItem) => {
     const nextStatus = item.status === "Pending" ? "In Progress" : item.status === "In Progress" ? "Done" : "Pending";
     await supabase.from("study_plan").update({ status: nextStatus }).eq("id", item.id);
+  };
+
+  const handleSyncSyllabus = async () => {
+    if (!userId) return;
+    setIsGenerating(true);
+    try {
+      const res = await fetch("/api/ai/sync-syllabus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      if (data.ui_message) showToast("success", data.ui_message);
+      else if (data.error) showToast("error", data.error);
+      await refetchTopics();
+    } catch { showToast("error", "Failed to sync syllabus."); }
+    setIsGenerating(false);
+  };
+
+  const handleSyllabusUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+    setIsSyllabusUploading(true);
+    try {
+      // Delete previous syllabus files from DB and storage
+      const { data: oldFiles } = await supabase
+        .from("uploaded_files")
+        .select("id, file_url")
+        .eq("user_id", userId)
+        .eq("file_type", "syllabus");
+      if (oldFiles && oldFiles.length > 0) {
+        // Remove from storage
+        const storagePaths = oldFiles
+          .map(f => {
+            try {
+              const url = new URL(f.file_url);
+              const idx = url.pathname.indexOf("/pyq-uploads/");
+              return idx >= 0 ? url.pathname.slice(idx + "/pyq-uploads/".length) : null;
+            } catch { return null; }
+          })
+          .filter(Boolean) as string[];
+        if (storagePaths.length > 0) {
+          await supabase.storage.from("pyq-uploads").remove(storagePaths);
+        }
+        // Remove from DB
+        await supabase
+          .from("uploaded_files")
+          .delete()
+          .eq("user_id", userId)
+          .eq("file_type", "syllabus");
+      }
+
+      const ext = file.name.split(".").pop();
+      const filePath = `${userId}/syllabus/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("pyq-uploads").upload(filePath, file);
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from("pyq-uploads").getPublicUrl(filePath);
+      await supabase.from("uploaded_files").insert({
+        user_id: userId,
+        file_name: file.name,
+        file_url: urlData.publicUrl,
+        file_type: "syllabus",
+        analysis_status: "pending",
+      });
+      showToast("success", `Uploaded "${file.name}" — Syncing syllabus...`);
+      // Await AI analysis so button stays in syncing state
+      const { data: inserted } = await supabase.from("uploaded_files").select("id").eq("user_id", userId).eq("file_name", file.name).order("created_at", { ascending: false }).limit(1).single();
+      if (inserted) {
+        const res = await fetch("/api/ai/analyze-document", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId: inserted.id, userId, fileName: file.name, fileType: "syllabus" }),
+        });
+        const data = await res.json();
+        if (data.ui_message) showToast("success", data.ui_message);
+        else if (data.error) showToast("error", data.error);
+        await refetchTopics();
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Upload failed.");
+    }
+    setIsSyllabusUploading(false);
+    if (syllabusFileRef.current) syllabusFileRef.current.value = "";
   };
 
   const strokeDashoffset = 364.4 - (364.4 * readiness) / 100;
@@ -384,18 +471,31 @@ export default function DashboardPage() {
 
             {activeTab === "syllabus" && (
               <div className="space-y-8">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                   <div>
                     <h2 className="text-2xl font-bold mb-1">Your Academic Syllabus</h2>
                     <p className="text-white/40 font-light">Comprehensive list of topics extracted from your academic profile and PYQs.</p>
                   </div>
-                  <Button className="rounded-full shadow-lg">
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    AI Syllabus Sync
-                  </Button>
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <Button variant="secondary" className="rounded-full" onClick={() => syllabusFileRef.current?.click()} disabled={isSyllabusUploading || isGenerating}>
+                        {isSyllabusUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                        {isSyllabusUploading ? "Syncing..." : "Upload Syllabus"}
+                      </Button>
+                      <input ref={syllabusFileRef} type="file" className="hidden" onChange={handleSyllabusUpload} />
+                      <Button className="rounded-full shadow-lg" onClick={handleSyncSyllabus} disabled={isGenerating || isSyllabusUploading}>
+                        {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                        {isGenerating ? "Syncing..." : "AI Syllabus Sync"}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-yellow-500/70 flex items-center gap-1 max-w-xs text-right">
+                      <AlertTriangle className="w-3 h-3 shrink-0" />
+                      AI-generated syllabus may be inaccurate. Your college website may not be up to date.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-3">
                   {Object.entries(
                     topics.reduce((acc, topic) => {
                       const sub = topic.subject || "General";
@@ -403,46 +503,149 @@ export default function DashboardPage() {
                       acc[sub].push(topic);
                       return acc;
                     }, {} as Record<string, PriorityTopic[]>)
-                  ).map(([subject, subTopics]) => (
-                    <Card key={subject} className="p-8 border-white/5 hover:border-white/10 transition-colors">
-                      <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-lg font-bold text-white/90">{subject}</h3>
-                        <div className="text-[10px] uppercase tracking-widest px-2 py-1 rounded bg-accent-blue/10 text-accent-blue border border-accent-blue/20">
-                          {subTopics.length} Topics
-                        </div>
-                      </div>
-                      <div className="space-y-4">
-                        {subTopics.map((topic) => (
-                          <div key={topic.id} className="p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/[0.08] transition-all group">
-                            <div className="flex justify-between items-start mb-2">
-                              <span className="text-sm font-medium text-white/80 group-hover:text-white transition-colors">{topic.name}</span>
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                                topic.priority === "High" ? "bg-red-500/10 text-red-400" :
-                                topic.priority === "Medium" ? "bg-orange-500/10 text-orange-400" : "bg-green-500/10 text-green-400"
-                              }`}>{topic.priority}</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
-                                <motion.div initial={{ width: 0 }} animate={{ width: `${topic.progress}%` }} className="h-full bg-accent-purple" />
-                              </div>
-                              <span className="text-[10px] text-white/20 font-mono">{topic.progress}%</span>
-                            </div>
+                  ).sort((a, b) => {
+                    // Sort subjects by credit points (highest first)
+                    const credA = a[1][0]?.credits || 0;
+                    const credB = b[1][0]?.credits || 0;
+                    return credB - credA;
+                  }).map(([subject, subTopics]) => {
+                    const isSubjectOpen = expandedSubjects[subject] || false;
+
+                    // Group topics by module
+                    const moduleMap = subTopics.reduce((acc, t) => {
+                      const mod = t.module || "General Topics";
+                      if (!acc[mod]) acc[mod] = [];
+                      acc[mod].push(t);
+                      return acc;
+                    }, {} as Record<string, PriorityTopic[]>);
+                    const moduleEntries = Object.entries(moduleMap).sort((a, b) => {
+                      // Extract module number — supports both Arabic (1,2,3) and Roman (I,II,III,IV,V)
+                      const romanMap: Record<string, number> = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8 };
+                      const getNum = (s: string) => {
+                        const arabic = s.match(/Module[\s-]*(\d+)/i);
+                        if (arabic) return parseInt(arabic[1]);
+                        const roman = s.match(/Module[\s-]*(I{1,3}V?|IV|VI{0,3}|V)/i);
+                        if (roman) return romanMap[roman[1].toUpperCase()] || 999;
+                        return 999;
+                      };
+                      if (!hasPyq) return getNum(a[0]) - getNum(b[0]);
+                      const highA = a[1].filter(t => t.priority === "High").length;
+                      const highB = b[1].filter(t => t.priority === "High").length;
+                      return highB - highA;
+                    });
+
+                    return (
+                      <div key={subject} className="rounded-xl border border-white/5 overflow-hidden bg-white/[0.02]">
+                        {/* Subject Header */}
+                        <button
+                          onClick={() => setExpandedSubjects(prev => ({ ...prev, [subject]: !prev[subject] }))}
+                          className="w-full flex items-center gap-3 px-5 py-4 hover:bg-white/5 transition-colors text-left"
+                        >
+                          <motion.div animate={{ rotate: isSubjectOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                            <ChevronDown className="w-4 h-4 text-white/40" />
+                          </motion.div>
+                          <BookOpen className="w-4 h-4 text-accent-purple" />
+                          <span className="flex-1 font-semibold text-white/90">{subject}</span>
+                          <div className="flex items-center gap-2">
+                            {subTopics[0]?.credits && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-purple/10 text-accent-purple font-mono">{subTopics[0].credits} cr</span>
+                            )}
+                            <span className="text-[10px] text-white/30">{moduleEntries.length} modules · {subTopics.length} topics</span>
                           </div>
-                        ))}
+                        </button>
+
+                        {/* Modules — collapsible */}
+                        <AnimatePresence>
+                          {isSubjectOpen && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.25 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="border-t border-white/5 px-3 pb-3 pt-2 space-y-1">
+                                {moduleEntries.map(([moduleName, modTopics]) => {
+                                  const modKey = `${subject}::${moduleName}`;
+                                  const isModuleOpen = expandedSubjects[modKey] || false;
+                                  const highCount = modTopics.filter(t => t.priority === "High").length;
+                                  const medCount = modTopics.filter(t => t.priority === "Medium").length;
+                                  const lowCount = modTopics.filter(t => t.priority === "Low").length;
+
+                                  return (
+                                    <div key={modKey} className="rounded-lg overflow-hidden">
+                                      {/* Module Header */}
+                                      <button
+                                        onClick={() => setExpandedSubjects(prev => ({ ...prev, [modKey]: !prev[modKey] }))}
+                                        className="w-full flex items-center gap-2 px-4 py-3 hover:bg-white/5 transition-colors text-left rounded-lg"
+                                      >
+                                        <motion.div animate={{ rotate: isModuleOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
+                                          <ChevronRight className="w-3.5 h-3.5 text-white/30" />
+                                        </motion.div>
+                                        <span className="flex-1 text-sm text-white/70 font-medium">{moduleName}</span>
+                                        <div className="flex items-center gap-1.5">
+                                          {hasPyq ? (
+                                            <>
+                                              {highCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">{highCount} High</span>}
+                                              {medCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400">{medCount} Med</span>}
+                                              {lowCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">{lowCount} Low</span>}
+                                            </>
+                                          ) : (
+                                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">L · {modTopics.length}</span>
+                                          )}
+                                          <span className="text-[9px] text-white/25">{modTopics.length}</span>
+                                        </div>
+                                      </button>
+
+                                      {/* Topics inside module */}
+                                      <AnimatePresence>
+                                        {isModuleOpen && (
+                                          <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: "auto", opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="overflow-hidden"
+                                          >
+                                            <div className="pl-9 pr-4 pb-2 space-y-0.5">
+                                              {modTopics.map((topic, idx) => (
+                                                <div key={topic.id} className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-white/5 transition-colors group">
+                                                  <span className="text-[9px] text-white/15 font-mono w-4">{idx + 1}.</span>
+                                                  <span className="flex-1 text-xs text-white/60 group-hover:text-white/80 transition-colors">{topic.name}</span>
+                                                  {hasPyq ? (
+                                                    <span className={`text-[8px] px-1 py-0.5 rounded shrink-0 ${
+                                                      topic.priority === "High" ? "bg-red-500/10 text-red-400" :
+                                                      topic.priority === "Medium" ? "bg-orange-500/10 text-orange-400" : "bg-green-500/10 text-green-400"
+                                                    }`}>{topic.priority}</span>
+                                                  ) : (
+                                                    <span className="text-[8px] px-1 py-0.5 rounded shrink-0 bg-blue-500/10 text-blue-400" title="Lecture-based (upload PYQ for exam priority)">L</span>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </motion.div>
+                                        )}
+                                      </AnimatePresence>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
-                    </Card>
-                  ))}
+                    );
+                  })}
 
                   {topics.length === 0 && (
-                    <Card className="col-span-full p-12 flex flex-col items-center justify-center text-center space-y-4 border-dashed border-white/10 bg-transparent">
+                    <Card className="p-12 flex flex-col items-center justify-center text-center space-y-4 border-dashed border-white/10 bg-transparent">
                       <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center">
                         <BookOpen className="w-8 h-8 text-white/20" />
                       </div>
                       <div>
                         <h3 className="text-lg font-semibold mb-1">No syllabus data yet</h3>
-                        <p className="text-sm text-white/40 max-w-md">Upload Past Year Papers (PYQs) or link your college portal to extract your academic syllabus automatically.</p>
+                        <p className="text-sm text-white/40 max-w-md">Upload your syllabus PDF or click AI Syllabus Sync to get started.</p>
                       </div>
-                      <Button variant="secondary" onClick={() => setActiveTab("pyqs")}>Go to PYQs</Button>
                     </Card>
                   )}
                 </div>
@@ -463,7 +666,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {files.map((file) => (
+                  {files.filter(f => f.file_type !== "syllabus").map((file) => (
                     <Card key={file.id} className="p-6 hover:border-accent-purple/30 transition-all group">
                       <div className="flex items-start justify-between mb-4">
                         <div className="p-3 rounded-xl bg-accent-purple/10 text-accent-purple group-hover:scale-110 transition-transform">

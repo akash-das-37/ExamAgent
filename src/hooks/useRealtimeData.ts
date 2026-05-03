@@ -11,6 +11,8 @@ export interface PriorityTopic {
   priority: "High" | "Medium" | "Low";
   progress: number;
   subject: string | null;
+  module: string | null;
+  credits: number | null;
   source: string;
   updated_at: string;
 }
@@ -29,6 +31,7 @@ export interface UploadedFile {
   file_name: string;
   file_url: string;
   file_size: number | null;
+  file_type: string | null;
   analysis_status: "pending" | "processing" | "completed" | "failed";
   extracted_topics: any;
   created_at: string;
