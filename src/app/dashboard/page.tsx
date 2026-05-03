@@ -148,7 +148,7 @@ export default function DashboardPage() {
       if (oldFiles && oldFiles.length > 0) {
         // Remove from storage
         const storagePaths = oldFiles
-          .map(f => {
+          .map((f: { file_url: string }) => {
             try {
               const url = new URL(f.file_url);
               const idx = url.pathname.indexOf("/pyq-uploads/");

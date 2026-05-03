@@ -14,8 +14,10 @@ import {
   ChevronRight, 
   ChevronLeft,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Loader2
 } from "lucide-react";
+import { createClient } from "@/lib/supabase";
 
 const steps = [
   { id: 1, title: "Academic Profile", icon: School },
@@ -40,9 +42,44 @@ export default function OnboardingPage() {
   const nextStep = () => setCurrentStep(prev => Math.min(prev + 1, steps.length));
   const prevStep = () => setCurrentStep(prev => Math.max(prev - 1, 1));
 
-  const handleComplete = () => {
-    // TODO: Save to Supabase
-    router.push("/dashboard");
+  const [isLoading, setIsLoading] = useState(false);
+  const supabase = createClient();
+
+  const handleComplete = async () => {
+    setIsLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user found");
+
+      // 1. Save Profile
+      const { error: profileError } = await supabase
+        .from("UserProfile")
+        .upsert({
+          id: user.id,
+          email: user.email,
+          collegeUrl: formData.collegeUrl,
+          course: "B.Tech", // Default or could be a field
+          stream: formData.branch,
+          semester: formData.semester,
+          onboardingDone: true,
+          updatedAt: new Date().toISOString()
+        });
+
+      if (profileError) throw profileError;
+
+      // 2. Trigger Syllabus Sync (Background)
+      fetch("/api/ai/sync-syllabus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      router.push("/dashboard");
+    } catch (err: any) {
+      console.error("Onboarding failed:", err);
+      alert("Something went wrong. Please try again.");
+    }
+    setIsLoading(false);
   };
 
   return (
@@ -214,8 +251,8 @@ export default function OnboardingPage() {
                 <ChevronRight className="w-4 h-4 ml-2" />
               </Button>
             ) : (
-              <Button onClick={handleComplete} className="px-10">
-                <Sparkles className="w-4 h-4 mr-2" />
+              <Button onClick={handleComplete} className="px-10" disabled={isLoading}>
+                {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
                 Finish Setup
               </Button>
             )}
