@@ -84,7 +84,7 @@ function useRealtimeTable<T>(
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: tableName },
-        (_payload) => {
+        () => {
           // Re-fetch on any change to keep data consistent
           fetchData();
         }
