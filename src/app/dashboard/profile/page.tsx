@@ -115,20 +115,43 @@ export default function ProfilePage() {
     reader.readAsDataURL(file);
 
     setIsSaving(true);
-    
-    // In a real app, you'd upload to Supabase Storage here
-    // For now, we'll update the avatar_url in metadata with the base64 (or mock it)
-    // Note: Large base64 strings might exceed metadata limits, but for small icons it's okay for a demo.
-    // Ideally use: await supabase.storage.from('avatars').upload(...)
-    
-    const { error } = await supabase.auth.updateUser({
-      data: { avatar_url: URL.createObjectURL(file) } // Mocking URL for now
-    });
 
-    if (error) {
-      setMessage({ type: 'error', text: "Failed to update photo: " + error.message });
-    } else {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error("Not authenticated");
+
+      // Upload to Supabase Storage 'avatars' bucket
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}/avatar.${fileExt}`;
+
+      // Remove old avatar if exists (overwrite)
+      await supabase.storage.from('avatars').remove([filePath]);
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // Get the permanent public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const permanentUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+
+      // Save the permanent URL in user metadata
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: { avatar_url: permanentUrl }
+      });
+
+      if (updateError) throw updateError;
+
+      setAvatarUrl(permanentUrl);
       setMessage({ type: 'success', text: "Photo updated successfully!" });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: "Failed to update photo: " + err.message });
     }
     setIsSaving(false);
   };

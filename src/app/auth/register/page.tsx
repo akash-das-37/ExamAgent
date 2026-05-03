@@ -8,7 +8,7 @@ import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
 import { motion, AnimatePresence } from "framer-motion";
-import { UserPlus, Github, Mail, ShieldCheck, AlertCircle } from "lucide-react";
+import { UserPlus, Github, Mail, ShieldCheck, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 
 const COURSE_OPTIONS = [
@@ -52,6 +52,8 @@ export default function RegisterPage() {
     password: "",
     confirmPassword: "",
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -230,24 +232,42 @@ export default function RegisterPage() {
               required
             />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Password"
-                name="password"
-                placeholder="••••••••"
-                type="password"
-                value={formData.password}
-                onChange={handleChange}
-                required
-              />
-              <Input
-                label="Set Password"
-                name="confirmPassword"
-                placeholder="••••••••"
-                type="password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                required
-              />
+              <div className="relative group">
+                <Input
+                  label="Password"
+                  name="password"
+                  placeholder="••••••••"
+                  type={showPassword ? "text" : "password"}
+                  value={formData.password}
+                  onChange={handleChange}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-[38px] text-white/30 hover:text-white/60 transition-colors p-1"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <div className="relative group">
+                <Input
+                  label="Set Password"
+                  name="confirmPassword"
+                  placeholder="••••••••"
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-[38px] text-white/30 hover:text-white/60 transition-colors p-1"
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
             <div className="flex items-start space-x-2 px-1 py-2">

@@ -95,12 +95,12 @@ END $$;
 async function runMigration() {
   console.log("Running migration against Supabase...");
   
-  const res = await fetch(\`\${SUPABASE_URL}/rest/v1/rpc/\`, {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "apikey": API_KEY,
-      "Authorization": \`Bearer \${API_KEY}\`,
+      "Authorization": `Bearer ${API_KEY}`,
     },
     body: JSON.stringify({ query: sql }),
   });
@@ -109,7 +109,7 @@ async function runMigration() {
   console.log("");
   console.log("=== MANUAL STEP REQUIRED ===");
   console.log("Please run the SQL migration manually in the Supabase Dashboard:");
-  console.log(\`1. Go to: \${SUPABASE_URL.replace('.co', '.com')}/project/dekyrymwwycgloffivmc/sql/new\`);
+  console.log(`1. Go to: ${SUPABASE_URL.replace('.co', '.com')}/project/dekyrymwwycgloffivmc/sql/new`);
   console.log("2. Copy the SQL from: supabase/migrations/001_antigravity_schema.sql");
   console.log("3. Click 'Run'");
   console.log("");

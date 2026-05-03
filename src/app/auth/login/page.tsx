@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
 import { motion, AnimatePresence } from "framer-motion";
-import { LogIn, Github, Mail, AlertCircle } from "lucide-react";
+import { LogIn, Github, Mail, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -92,15 +93,26 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-            <div className="space-y-1">
+            <div className="space-y-1 relative group">
               <Input
                 label="Password"
                 placeholder="••••••••"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-[38px] text-white/30 hover:text-white/60 transition-colors p-1"
+              >
+                {showPassword ? (
+                  <EyeOff className="w-5 h-5" />
+                ) : (
+                  <Eye className="w-5 h-5" />
+                )}
+              </button>
               <div className="flex justify-between items-center px-1">
                 <label className="flex items-center space-x-2 cursor-pointer group">
                   <input type="checkbox" className="w-4 h-4 rounded border-white/10 bg-white/5 accent-accent-purple" />
