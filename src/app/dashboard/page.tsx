@@ -14,7 +14,7 @@ import {
 import {
   Clock, Target, BarChart3, Sparkles, Flame, ChevronRight, ChevronDown,
   MessageCircle, TrendingUp, FileText, Upload, Loader2, CheckCircle2,
-  LayoutDashboard, BookOpen, AlertTriangle, Trash2, X, ArrowRight, Calendar
+  LayoutDashboard, BookOpen, AlertTriangle, Trash2, X, ArrowRight, Calendar, Brain
 } from "lucide-react";
 
 const sidebarItems = [
@@ -37,6 +37,8 @@ export default function DashboardPage() {
   const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
   const [pyqModal, setPyqModal] = useState<{ open: boolean; subject: string | null }>({ open: false, subject: null });
   const [isDeletingFile, setIsDeletingFile] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [expandedPlanSubjects, setExpandedPlanSubjects] = useState<Record<string, boolean>>({});
   const supabase = createClient();
 
   const { data: topics, loading: topicsLoading, refetch: refetchTopics } = usePriorityTopics();
@@ -145,6 +147,24 @@ export default function DashboardPage() {
   const handleToggleStatus = async (item: StudyPlanItem) => {
     const nextStatus = item.status === "Pending" ? "In Progress" : item.status === "In Progress" ? "Done" : "Pending";
     await supabase.from("study_plan").update({ status: nextStatus }).eq("id", item.id);
+  };
+
+
+  const handleBrainAnalyze = async () => {
+    if (!userId) return;
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch("/api/ai/analyze-pyq-brain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      if (data.ui_message) showToast("success", data.ui_message);
+      else if (data.error) showToast("error", data.error);
+      refetchTopics();
+    } catch { showToast("error", "Brain analysis failed."); }
+    setIsAnalyzing(false);
   };
 
   const handleSyncSyllabus = async () => {
