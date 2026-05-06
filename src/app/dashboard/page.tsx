@@ -579,10 +579,7 @@ export default function DashboardPage() {
                         if (roman) return romanMap[roman[1].toUpperCase()] || 999;
                         return 999;
                       };
-                      if (!subjectHasPyq) return getNum(a[0]) - getNum(b[0]);
-                      const highA = a[1].filter(t => t.priority === "High").length;
-                      const highB = b[1].filter(t => t.priority === "High").length;
-                      return highB - highA;
+                      return getNum(a[0]) - getNum(b[0]);
                     });
 
                     return (
@@ -635,15 +632,7 @@ export default function DashboardPage() {
                                         </motion.div>
                                         <span className="flex-1 text-sm text-white/70 font-medium">{moduleName}</span>
                                         <div className="flex items-center gap-1.5">
-                                          {subjectHasPyq ? (
-                                            <>
-                                              {highCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">{highCount} High</span>}
-                                              {medCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400">{medCount} Med</span>}
-                                              {lowCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">{lowCount} Low</span>}
-                                            </>
-                                          ) : (
-                                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">L · {modTopics.length}</span>
-                                          )}
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">Module Topics</span>
                                           <span className="text-[9px] text-white/25">{modTopics.length}</span>
                                         </div>
                                       </button>
@@ -663,14 +652,7 @@ export default function DashboardPage() {
                                                 <div key={topic.id} className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-white/5 transition-colors group">
                                                   <span className="text-[9px] text-white/15 font-mono w-4">{idx + 1}.</span>
                                                   <span className="flex-1 text-xs text-white/60 group-hover:text-white/80 transition-colors">{topic.name}</span>
-                                                  {subjectHasPyq ? (
-                                                    <span className={`text-[8px] px-1 py-0.5 rounded shrink-0 ${
-                                                      topic.priority === "High" ? "bg-red-500/10 text-red-400" :
-                                                      topic.priority === "Medium" ? "bg-orange-500/10 text-orange-400" : "bg-green-500/10 text-green-400"
-                                                    }`}>{topic.priority}</span>
-                                                  ) : (
-                                                    <span className="text-[8px] px-1 py-0.5 rounded shrink-0 bg-blue-500/10 text-blue-400" title="Lecture-based (upload PYQ for exam priority)">L</span>
-                                                  )}
+                                                  <span className="text-[8px] px-1 py-0.5 rounded shrink-0 bg-blue-500/10 text-blue-400" title="Lecture Topic">Topic</span>
                                                 </div>
                                               ))}
                                             </div>
