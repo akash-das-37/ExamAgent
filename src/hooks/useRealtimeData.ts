@@ -24,6 +24,7 @@ export interface StudyPlanItem {
   scheduled_time: string | null;
   status: "Pending" | "In Progress" | "Done";
   plan_date: string;
+  subject: string | null;
 }
 
 export interface UploadedFile {
@@ -32,6 +33,7 @@ export interface UploadedFile {
   file_url: string;
   file_size: number | null;
   file_type: string | null;
+  subject: string | null;
   analysis_status: "pending" | "processing" | "completed" | "failed";
   extracted_topics: any;
   created_at: string;

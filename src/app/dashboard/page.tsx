@@ -14,13 +14,14 @@ import {
 import {
   Clock, Target, BarChart3, Sparkles, Flame, ChevronRight, ChevronDown,
   MessageCircle, TrendingUp, FileText, Upload, Loader2, CheckCircle2,
-  LayoutDashboard, BookOpen, AlertTriangle
+  LayoutDashboard, BookOpen, AlertTriangle, Trash2, X, ArrowRight, Calendar
 } from "lucide-react";
 
 const sidebarItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "syllabus", label: "Your Syllabus", icon: BookOpen },
   { id: "pyqs", label: "PYQs", icon: FileText },
+  { id: "plan", label: "Study Plan", icon: Calendar },
 ];
 
 export default function DashboardPage() {
@@ -34,6 +35,8 @@ export default function DashboardPage() {
   const syllabusFileRef = useRef<HTMLInputElement>(null);
   const [isSyllabusUploading, setIsSyllabusUploading] = useState(false);
   const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
+  const [pyqModal, setPyqModal] = useState<{ open: boolean; subject: string | null }>({ open: false, subject: null });
+  const [isDeletingFile, setIsDeletingFile] = useState<string | null>(null);
   const supabase = createClient();
 
   const { data: topics, loading: topicsLoading, refetch: refetchTopics } = usePriorityTopics();
@@ -42,7 +45,6 @@ export default function DashboardPage() {
   const { data: exams } = useExams();
   const { data: sessions } = useStudySessions(7);
 
-  const hasPyq = files.some(f => f.file_type === "pyq" || f.file_type === "PYQ");
   const readiness = calculateReadiness(topics);
   const countdown = getNextExamCountdown(exams);
   const dailyProgress = aggregateDailyProgress(sessions, 7);
@@ -91,25 +93,53 @@ export default function DashboardPage() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userId) return;
+    const subject = pyqModal.subject;
+    setPyqModal({ open: false, subject: null });
     setIsUploading(true);
     try {
-      const filePath = `${userId}/${Date.now()}_${file.name}`;
+      const filePath = `${userId}/pyq/${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage.from("pyq-uploads").upload(filePath, file);
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from("pyq-uploads").getPublicUrl(filePath);
       const { data: fileRecord } = await supabase.from("uploaded_files").insert({
-        user_id: userId, file_name: file.name, file_url: urlData.publicUrl, file_size: file.size,
+        user_id: userId,
+        file_name: file.name,
+        file_url: urlData.publicUrl,
+        file_size: file.size,
+        file_type: "pyq",
+        subject: subject,
+        analysis_status: "pending",
       }).select().single();
       if (fileRecord) {
         fetch("/api/ai/analyze-document", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileId: fileRecord.id, userId, fileName: file.name }),
+          body: JSON.stringify({ fileId: fileRecord.id, userId, fileName: file.name, subject }),
         }).then(r => r.json()).then(d => { if (d.ui_message) showToast("success", d.ui_message); });
       }
-      showToast("success", `Uploaded ${file.name}. Analyzing...`);
+      showToast("success", `Uploaded "${file.name}" for ${subject || "General"}. Analyzing...`);
     } catch (err: any) { showToast("error", "Upload failed: " + err.message); }
     setIsUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleDeleteFile = async (fileId: string, fileUrl: string) => {
+    if (!userId) return;
+    setIsDeletingFile(fileId);
+    try {
+      // Remove from storage
+      try {
+        const url = new URL(fileUrl);
+        const idx = url.pathname.indexOf("/pyq-uploads/");
+        if (idx >= 0) {
+          const storagePath = url.pathname.slice(idx + "/pyq-uploads/".length);
+          await supabase.storage.from("pyq-uploads").remove([storagePath]);
+        }
+      } catch {}
+      // Remove from DB
+      await supabase.from("uploaded_files").delete().eq("id", fileId).eq("user_id", userId);
+      showToast("success", "File deleted.");
+    } catch (err: any) { showToast("error", "Delete failed: " + err.message); }
+    setIsDeletingFile(null);
   };
 
   const handleToggleStatus = async (item: StudyPlanItem) => {
@@ -439,17 +469,17 @@ export default function DashboardPage() {
                     <Card className="p-6">
                       <h3 className="font-bold mb-4 flex items-center gap-2"><FileText className="w-4 h-4" />Uploaded PYQs</h3>
                       <div className="space-y-3">
-                        {files.map((file) => (
-                          <div key={file.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors cursor-pointer group">
+                        {files.filter(f => f.file_type !== "syllabus").map((file) => (
+                          <div key={file.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group">
                             <span className="text-xs text-white/60 group-hover:text-white transition-colors truncate flex-1">{file.file_name}</span>
                             {file.analysis_status === "processing" ? <Loader2 className="w-3 h-3 animate-spin text-accent-purple" /> :
                              file.analysis_status === "completed" ? <CheckCircle2 className="w-3 h-3 text-green-500" /> :
                              <ChevronRight className="w-3 h-3 text-white/20" />}
                           </div>
                         ))}
-                        <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileUpload} />
+                        <input ref={fileInputRef} type="file" accept="*/*" className="hidden" onChange={handleFileUpload} />
                         <Button variant="secondary" className="w-full text-[10px] uppercase tracking-widest border-dashed border-white/20 bg-transparent"
-                          onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                          onClick={() => setPyqModal({ open: true, subject: null })} disabled={isUploading}>
                           {isUploading ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Upload className="w-3 h-3 mr-2" />}
                           Upload PYQ
                         </Button>
@@ -510,6 +540,7 @@ export default function DashboardPage() {
                     return credB - credA;
                   }).map(([subject, subTopics]) => {
                     const isSubjectOpen = expandedSubjects[subject] || false;
+                    const subjectHasPyq = files.some(f => f.subject === subject && f.file_type !== "syllabus");
 
                     // Group topics by module
                     const moduleMap = subTopics.reduce((acc, t) => {
@@ -528,7 +559,7 @@ export default function DashboardPage() {
                         if (roman) return romanMap[roman[1].toUpperCase()] || 999;
                         return 999;
                       };
-                      if (!hasPyq) return getNum(a[0]) - getNum(b[0]);
+                      if (!subjectHasPyq) return getNum(a[0]) - getNum(b[0]);
                       const highA = a[1].filter(t => t.priority === "High").length;
                       const highB = b[1].filter(t => t.priority === "High").length;
                       return highB - highA;
@@ -584,7 +615,7 @@ export default function DashboardPage() {
                                         </motion.div>
                                         <span className="flex-1 text-sm text-white/70 font-medium">{moduleName}</span>
                                         <div className="flex items-center gap-1.5">
-                                          {hasPyq ? (
+                                          {subjectHasPyq ? (
                                             <>
                                               {highCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">{highCount} High</span>}
                                               {medCount > 0 && <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400">{medCount} Med</span>}
@@ -612,7 +643,7 @@ export default function DashboardPage() {
                                                 <div key={topic.id} className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-white/5 transition-colors group">
                                                   <span className="text-[9px] text-white/15 font-mono w-4">{idx + 1}.</span>
                                                   <span className="flex-1 text-xs text-white/60 group-hover:text-white/80 transition-colors">{topic.name}</span>
-                                                  {hasPyq ? (
+                                                  {subjectHasPyq ? (
                                                     <span className={`text-[8px] px-1 py-0.5 rounded shrink-0 ${
                                                       topic.priority === "High" ? "bg-red-500/10 text-red-400" :
                                                       topic.priority === "Medium" ? "bg-orange-500/10 text-orange-400" : "bg-green-500/10 text-green-400"
@@ -659,47 +690,236 @@ export default function DashboardPage() {
                     <h2 className="text-2xl font-bold mb-1">Past Year Papers</h2>
                     <p className="text-white/40 font-light">Manage and analyze your uploaded examination papers.</p>
                   </div>
-                  <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                  <Button onClick={() => setPyqModal({ open: true, subject: null })} disabled={isUploading}>
                     {isUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
                     Upload New PYQ
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {files.filter(f => f.file_type !== "syllabus").map((file) => (
-                    <Card key={file.id} className="p-6 hover:border-accent-purple/30 transition-all group">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="p-3 rounded-xl bg-accent-purple/10 text-accent-purple group-hover:scale-110 transition-transform">
-                          <FileText className="w-6 h-6" />
+                {/* Group PYQs by subject */}
+                {(() => {
+                  const pyqFiles = files.filter(f => f.file_type !== "syllabus");
+                  // Group by subject field, fallback to "General"
+                  const grouped = pyqFiles.reduce((acc, f) => {
+                    const sub = (f as any).subject || "General";
+                    if (!acc[sub]) acc[sub] = [];
+                    acc[sub].push(f);
+                    return acc;
+                  }, {} as Record<string, typeof pyqFiles>);
+
+                  if (pyqFiles.length === 0) {
+                    return (
+                      <Card
+                        onClick={() => setPyqModal({ open: true, subject: null })}
+                        className="p-12 border-dashed border-white/10 bg-transparent flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-accent-purple/30 transition-all group"
+                      >
+                        <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-accent-purple/10 group-hover:text-accent-purple transition-all">
+                          <Upload className="w-7 h-7" />
                         </div>
-                        <div className={`text-[10px] px-2 py-1 rounded-full uppercase tracking-widest ${
-                          file.analysis_status === "completed" ? "bg-green-500/10 text-green-400" :
-                          file.analysis_status === "processing" ? "bg-accent-purple/10 text-accent-purple" :
-                          "bg-white/5 text-white/30"
-                        }`}>
-                          {file.analysis_status}
+                        <div className="text-center">
+                          <p className="font-semibold mb-1">No PYQs uploaded yet</p>
+                          <p className="text-xs text-white/30">Upload past year papers to get AI-powered priority analysis</p>
                         </div>
-                      </div>
-                      <h3 className="font-semibold text-white/90 mb-1 truncate">{file.file_name}</h3>
-                      <p className="text-[10px] text-white/20 mb-6 uppercase tracking-widest">
-                        {file.file_size ? `${(file.file_size / 1024).toFixed(1)} KB` : "Size Unknown"} • {new Date(file.created_at).toLocaleDateString()}
-                      </p>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" className="flex-1 text-[10px] uppercase tracking-widest h-9 border border-white/5 hover:bg-white/5" onClick={() => window.open(file.file_url)}>View</Button>
-                        <Button variant="secondary" className="flex-1 text-[10px] uppercase tracking-widest h-9">Analyze</Button>
+                      </Card>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-6">
+                      {Object.entries(grouped).map(([subject, subFiles]) => (
+                        <div key={subject}>
+                          <h3 className="text-sm font-semibold text-white/50 uppercase tracking-widest mb-3 flex items-center gap-2">
+                            <BookOpen className="w-3.5 h-3.5" />{subject}
+                            <span className="text-white/20 font-normal normal-case tracking-normal">({subFiles.length} file{subFiles.length !== 1 ? "s" : ""})</span>
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {subFiles.map((file) => (
+                              <Card key={file.id} className="p-5 hover:border-accent-purple/30 transition-all group relative">
+                                <div className="flex items-start justify-between mb-3">
+                                  <div className="p-2.5 rounded-xl bg-accent-purple/10 text-accent-purple group-hover:scale-110 transition-transform">
+                                    <FileText className="w-5 h-5" />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <div className={`text-[10px] px-2 py-1 rounded-full uppercase tracking-widest ${
+                                      file.analysis_status === "completed" ? "bg-green-500/10 text-green-400" :
+                                      file.analysis_status === "processing" ? "bg-accent-purple/10 text-accent-purple" :
+                                      "bg-white/5 text-white/30"
+                                    }`}>
+                                      {file.analysis_status}
+                                    </div>
+                                    <button
+                                      onClick={() => handleDeleteFile(file.id, file.file_url)}
+                                      disabled={isDeletingFile === file.id}
+                                      className="p-1.5 rounded-lg text-white/20 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                                      title="Delete this file"
+                                    >
+                                      {isDeletingFile === file.id
+                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        : <Trash2 className="w-3.5 h-3.5" />}
+                                    </button>
+                                  </div>
+                                </div>
+                                <h3 className="font-semibold text-white/90 mb-1 truncate text-sm">{file.file_name}</h3>
+                                <p className="text-[10px] text-white/20 mb-4 uppercase tracking-widest">
+                                  {file.file_size ? `${(file.file_size / 1024).toFixed(1)} KB` : "Size Unknown"} · {new Date(file.created_at).toLocaleDateString()}
+                                </p>
+                                <Button variant="ghost" className="w-full text-[10px] uppercase tracking-widest h-8 border border-white/5 hover:bg-white/5" onClick={() => window.open(file.file_url)}>View</Button>
+                              </Card>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      {/* Add more button */}
+                      <button
+                        onClick={() => setPyqModal({ open: true, subject: null })}
+                        className="flex items-center gap-2 text-xs text-white/30 hover:text-accent-purple transition-colors px-2"
+                      >
+                        <Upload className="w-3.5 h-3.5" /> Upload another PYQ
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                <input ref={fileInputRef} type="file" accept="*" className="hidden" onChange={handleFileUpload} />
+              </div>
+            )}
+
+            {activeTab === "plan" && (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold mb-1">Study Plan</h2>
+                    <p className="text-white/40 font-light">Your personalized learning path for the upcoming exams.</p>
+                  </div>
+                  <Button onClick={handleGeneratePlan} disabled={isGenerating}>
+                    {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                    {isGenerating ? "Generating..." : "Generate New Plan"}
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Left: Summary & Calendar View */}
+                  <div className="space-y-6">
+                    <Card className="p-6 bg-accent-purple/5 border-accent-purple/20">
+                      <h3 className="font-bold mb-4 flex items-center gap-2 text-sm uppercase tracking-wider text-accent-purple">
+                        <Calendar className="w-4 h-4" /> Weekly Outlook
+                      </h3>
+                      <div className="grid grid-cols-7 gap-1">
+                        {['S','M','T','W','T','F','S'].map((d, i) => (
+                          <div key={i} className="text-[10px] text-center text-white/20 py-1">{d}</div>
+                        ))}
+                        {Array.from({ length: 14 }).map((_, i) => {
+                          const date = new Date();
+                          date.setDate(date.getDate() + (i - 2));
+                          const isToday = i === 2;
+                          const hasTasks = planItems.some(p => p.plan_date === date.toISOString().split('T')[0]);
+                          return (
+                            <div key={i} className={`aspect-square flex flex-col items-center justify-center rounded-lg border text-[10px] relative transition-all ${
+                              isToday ? 'bg-accent-purple border-accent-purple text-white' : 
+                              hasTasks ? 'bg-accent-purple/10 border-accent-purple/20 text-white/60' :
+                              'bg-white/5 border-white/5 text-white/20'
+                            }`}>
+                              {date.getDate()}
+                              {hasTasks && !isToday && <div className="absolute bottom-1 w-1 h-1 rounded-full bg-accent-purple" />}
+                            </div>
+                          );
+                        })}
                       </div>
                     </Card>
-                  ))}
 
-                  <Card 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-6 border-dashed border-white/10 bg-transparent flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-accent-purple/30 transition-all group min-h-[220px]"
-                  >
-                    <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-accent-purple/10 group-hover:text-accent-purple transition-all">
-                      <Upload className="w-5 h-5" />
-                    </div>
-                    <span className="text-xs text-white/20 uppercase tracking-widest group-hover:text-white transition-all">Upload Paper</span>
-                  </Card>
+                    <Card className="p-6">
+                      <h3 className="font-bold mb-4 text-sm uppercase tracking-wider text-white/40">Status Overview</h3>
+                      <div className="space-y-4">
+                        {[
+                          { label: 'Completed', count: planItems.filter(p => p.status === 'Done').length, color: 'bg-green-500' },
+                          { label: 'In Progress', count: planItems.filter(p => p.status === 'In Progress').length, color: 'bg-accent-purple' },
+                          { label: 'Upcoming', count: planItems.filter(p => p.status === 'Pending').length, color: 'bg-white/10' },
+                        ].map((s, i) => (
+                          <div key={i} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-2 h-2 rounded-full ${s.color}`} />
+                              <span className="text-xs text-white/60">{s.label}</span>
+                            </div>
+                            <span className="text-xs font-bold">{s.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  </div>
+
+                  {/* Right: Detailed Plan List */}
+                  <div className="lg:col-span-2">
+                    <Card className="p-8">
+                      <div className="flex items-center justify-between mb-8">
+                        <h3 className="text-lg font-bold">Upcoming Tasks</h3>
+                        <div className="flex gap-2">
+                           <span className="text-[10px] px-2 py-1 rounded bg-white/5 text-white/40 uppercase tracking-widest border border-white/5">
+                             Sorted by Date
+                           </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-8 relative before:absolute before:left-8 before:top-2 before:bottom-2 before:w-[1px] before:bg-white/5">
+                        {planLoading ? (
+                          <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-accent-purple" /></div>
+                        ) : planItems.length === 0 ? (
+                          <div className="text-center py-12">
+                            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
+                              <Sparkles className="w-8 h-8 text-white/10" />
+                            </div>
+                            <p className="text-sm text-white/30">No tasks generated. Click the button above to start your journey!</p>
+                          </div>
+                        ) : (
+                          // Sort plan items by date and time
+                          [...planItems]
+                            .sort((a, b) => {
+                              const dateA = new Date(a.plan_date + 'T' + (a.scheduled_time || '00:00')).getTime();
+                              const dateB = new Date(b.plan_date + 'T' + (b.scheduled_time || '00:00')).getTime();
+                              return dateA - dateB;
+                            })
+                            .map((item, i) => {
+                              const isToday = item.plan_date === new Date().toISOString().split('T')[0];
+                              return (
+                                <motion.div key={item.id} layout initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }} className="flex items-start gap-6 group">
+                                  <div className="flex flex-col items-center w-16 shrink-0 pt-1">
+                                    <span className={`text-[10px] font-bold ${isToday ? 'text-accent-purple' : 'text-white/20'}`}>
+                                      {isToday ? 'TODAY' : new Date(item.plan_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    </span>
+                                    <span className="text-[10px] text-white/40 font-mono mt-1">{item.scheduled_time}</span>
+                                  </div>
+
+                                  <div className="flex-1 pb-8 relative">
+                                    <div className={`absolute top-2 -left-[31px] z-10 w-3 h-3 rounded-full border-2 border-background shadow-[0_0_10px_rgba(0,0,0,0.5)] ${
+                                      item.status === "Done" ? "bg-green-500" : item.status === "In Progress" ? "bg-accent-purple" : "bg-white/10"
+                                    }`} />
+                                    
+                                    <div 
+                                      onClick={() => handleToggleStatus(item)}
+                                      className="p-5 rounded-2xl glass border-white/5 group-hover:border-white/20 transition-all flex items-center justify-between cursor-pointer group/item hover:bg-white/[0.02]"
+                                    >
+                                      <div className="space-y-1">
+                                        <p className={`text-sm font-semibold tracking-tight ${item.status === "Done" ? "text-white/30 line-through" : "text-white/90"}`}>{item.task}</p>
+                                        <div className="flex items-center gap-3">
+                                          <span className="text-[9px] px-2 py-0.5 rounded-full bg-accent-cyan/10 text-accent-cyan font-bold uppercase tracking-tighter">{item.category}</span>
+                                          {item.subject && <span className="text-[9px] text-white/30 truncate max-w-[150px]">for {item.subject}</span>}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        {item.status === "Done" ? (
+                                          <div className="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center"><CheckCircle2 className="w-4 h-4 text-green-500" /></div>
+                                        ) : (
+                                          <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center opacity-0 group-hover/item:opacity-100 transition-opacity"><ChevronRight className="w-4 h-4 text-white/40" /></div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              );
+                            })
+                        )}
+                      </div>
+                    </Card>
+                  </div>
                 </div>
               </div>
             )}
@@ -707,14 +927,74 @@ export default function DashboardPage() {
         </main>
       </div>
 
+      {/* PYQ Subject Selector Modal */}
+      <AnimatePresence>
+        {pyqModal.open && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setPyqModal({ open: false, subject: null }); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-md bg-surface border border-white/10 rounded-2xl p-6 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h3 className="text-lg font-bold">Upload PYQ</h3>
+                  <p className="text-xs text-white/40 mt-0.5">Select the subject this paper belongs to</p>
+                </div>
+                <button onClick={() => setPyqModal({ open: false, subject: null })} className="p-2 rounded-lg hover:bg-white/5 text-white/40 hover:text-white transition-all">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Subject list from syllabus */}
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1 mb-5">
+                {topics.length === 0 ? (
+                  <p className="text-xs text-white/30 text-center py-6">No syllabus subjects found.<br/>Sync your syllabus first to pick a subject.</p>
+                ) : (
+                  Array.from(new Set(topics.map(t => t.subject).filter(Boolean))).map(subject => (
+                    <button
+                      key={subject}
+                      onClick={() => setPyqModal(prev => ({ ...prev, subject: subject! }))}
+                      className={`w-full text-left px-4 py-3 rounded-xl border transition-all flex items-center gap-3 ${
+                        pyqModal.subject === subject
+                          ? "border-accent-purple bg-accent-purple/10 text-white"
+                          : "border-white/5 bg-white/[0.02] hover:bg-white/5 text-white/70"
+                      }`}
+                    >
+                      <BookOpen className={`w-4 h-4 shrink-0 ${pyqModal.subject === subject ? "text-accent-purple" : "text-white/30"}`} />
+                      <span className="text-sm font-medium">{subject}</span>
+                      {pyqModal.subject === subject && <CheckCircle2 className="w-4 h-4 text-accent-purple ml-auto" />}
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <Button
+                className="w-full"
+                disabled={!pyqModal.subject || isUploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {isUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                {pyqModal.subject ? `Upload for "${pyqModal.subject}"` : "Select a subject first"}
+              </Button>
+              <p className="text-[10px] text-white/20 text-center mt-2">Accepts PDF, JPG, DOCX, and all other file types</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
         className="fixed bottom-8 right-8 w-16 h-16 rounded-full bg-gradient-to-r from-accent-purple to-accent-blue shadow-2xl shadow-accent-purple/40 flex items-center justify-center text-white z-50">
         <Sparkles className="w-8 h-8" />
       </motion.button>
     </div>
   );
-}
-
-function ArrowRight(props: any) {
-  return (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>);
 }

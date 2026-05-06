@@ -172,6 +172,9 @@ export default function ProfilePage() {
     });
 
     // Update UserProfile table
+    const { data: oldProfile } = await supabase.from("UserProfile").select("semester").eq("id", user.id).single();
+    const semesterChanged = oldProfile && String(oldProfile.semester) !== String(formData.semester);
+
     const { error } = await supabase
       .from("UserProfile")
       .update({
@@ -187,7 +190,33 @@ export default function ProfilePage() {
     if (error) {
       setMessage({ type: 'error', text: error.message });
     } else {
-      setMessage({ type: 'success', text: "Profile updated successfully!" });
+      // If semester changed, wipe all uploaded files (they're semester-specific)
+      if (semesterChanged) {
+        const { data: oldFiles } = await supabase
+          .from("uploaded_files")
+          .select("id, file_url")
+          .eq("user_id", user.id);
+        if (oldFiles && oldFiles.length > 0) {
+          const storagePaths = oldFiles
+            .map((f: { file_url: string }) => {
+              try {
+                const url = new URL(f.file_url);
+                const idx = url.pathname.indexOf("/pyq-uploads/");
+                return idx >= 0 ? url.pathname.slice(idx + "/pyq-uploads/".length) : null;
+              } catch { return null; }
+            })
+            .filter(Boolean) as string[];
+          if (storagePaths.length > 0) {
+            await supabase.storage.from("pyq-uploads").remove(storagePaths);
+          }
+          await supabase.from("uploaded_files").delete().eq("user_id", user.id);
+        }
+        // Also clear priority topics (syllabus is now outdated)
+        await supabase.from("priority_topics").delete().eq("user_id", user.id);
+        setMessage({ type: 'success', text: "Semester updated! Previous syllabus & PYQ files have been cleared for your new semester." });
+      } else {
+        setMessage({ type: 'success', text: "Profile updated successfully!" });
+      }
     }
     setIsSaving(false);
   };
