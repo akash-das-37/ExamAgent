@@ -112,13 +112,26 @@ export default function DashboardPage() {
         subject: subject,
         analysis_status: "pending",
       }).select().single();
+      showToast("success", `Uploaded "${file.name}" for ${subject || "General"}. Analyzing...`);
       if (fileRecord) {
-        fetch("/api/ai/analyze-document", {
+        // Step 1: Analyze the document (extract topics)
+        const docRes = await fetch("/api/ai/analyze-document", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileId: fileRecord.id, userId, fileName: file.name, subject }),
-        }).then(r => r.json()).then(d => { if (d.ui_message) showToast("success", d.ui_message); });
+        });
+        const docData = await docRes.json();
+        if (docData.ui_message) showToast("success", docData.ui_message);
+
+        // Step 2: Auto-trigger PYQ Brain analysis to update priorities
+        showToast("success", "Syncing priorities from PYQ data...");
+        const brainRes = await fetch("/api/ai/analyze-pyq-brain", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId }),
+        });
+        const brainData = await brainRes.json();
+        if (brainData.ui_message) showToast("success", brainData.ui_message);
+        await refetchTopics();
       }
-      showToast("success", `Uploaded "${file.name}" for ${subject || "General"}. Analyzing...`);
     } catch (err: any) { showToast("error", "Upload failed: " + err.message); }
     setIsUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -793,10 +806,16 @@ export default function DashboardPage() {
                     <h2 className="text-2xl font-bold mb-1">Study Plan</h2>
                     <p className="text-white/40 font-light">Your personalized learning path for the upcoming exams.</p>
                   </div>
-                  <Button onClick={handleGeneratePlan} disabled={isGenerating}>
-                    {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                    {isGenerating ? "Generating..." : "Generate New Plan"}
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    <Button onClick={handleBrainAnalyze} disabled={isAnalyzing} variant="ghost" className="border border-accent-purple/50 text-accent-purple hover:bg-accent-purple/10">
+                      {isAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Brain className="w-4 h-4 mr-2" />}
+                      {isAnalyzing ? "Analyzing PYQs..." : "AI PYQ Brain Analysis"}
+                    </Button>
+                    <Button onClick={handleGeneratePlan} disabled={isGenerating}>
+                      {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                      {isGenerating ? "Generating..." : "Generate New Plan"}
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -845,6 +864,117 @@ export default function DashboardPage() {
                             <span className="text-xs font-bold">{s.count}</span>
                           </div>
                         ))}
+                      </div>
+                    </Card>
+
+                    {/* Prioritized Syllabus View */}
+                    <Card className="p-6">
+                      <h3 className="font-bold mb-4 text-sm uppercase tracking-wider text-white/40 flex items-center justify-between">
+                        <span>Prioritized Topics</span>
+                        <Brain className="w-4 h-4 text-accent-purple" />
+                      </h3>
+                      <div className="space-y-3">
+                        {Object.entries(
+                          topics.reduce((acc, t) => {
+                            const sub = t.subject || "General";
+                            if (!acc[sub]) acc[sub] = [];
+                            acc[sub].push(t);
+                            return acc;
+                          }, {} as Record<string, PriorityTopic[]>)
+                        ).sort((a, b) => {
+                           const credA = a[1][0]?.credits || 0;
+                           const credB = b[1][0]?.credits || 0;
+                           return credB - credA;
+                        }).map(([subject, subTopics]) => {
+                           const isSubjectOpen = expandedPlanSubjects[subject] || false;
+                           // Only show subjects with PYQs in this prioritized view
+                           const subjectHasPyq = files.some(f => f.subject === subject && f.file_type !== "syllabus");
+                           if (!subjectHasPyq) return null;
+
+                           // Group topics by module
+                           const moduleMap = subTopics.reduce((acc, t) => {
+                             const mod = t.module || "General Topics";
+                             if (!acc[mod]) acc[mod] = [];
+                             acc[mod].push(t);
+                             return acc;
+                           }, {} as Record<string, PriorityTopic[]>);
+                           
+                           const moduleEntries = Object.entries(moduleMap).sort((a, b) => {
+                             const sumA = a[1].reduce((sum, t) => sum + (parseInt(t.priority) || 0), 0);
+                             const sumB = b[1].reduce((sum, t) => sum + (parseInt(t.priority) || 0), 0);
+                             return sumB - sumA; // Sort by highest repetitions first
+                           });
+
+                           return (
+                             <div key={subject} className="rounded-lg border border-white/5 overflow-hidden bg-white/[0.02]">
+                               <button
+                                 onClick={() => setExpandedPlanSubjects(prev => ({ ...prev, [subject]: !prev[subject] }))}
+                                 className="w-full flex items-center justify-between p-3 hover:bg-white/5 transition-colors text-left"
+                               >
+                                 <div className="flex flex-col">
+                                   <span className="text-sm font-semibold truncate max-w-[150px]">{subject}</span>
+                                 </div>
+                                 <ChevronDown className={`w-3 h-3 text-white/30 transition-transform ${isSubjectOpen ? "rotate-180" : ""}`} />
+                               </button>
+
+                               <AnimatePresence>
+                                 {isSubjectOpen && (
+                                   <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                                     <div className="border-t border-white/5 px-2 pb-2 pt-1 space-y-1">
+                                       {moduleEntries.map(([moduleName, modTopics]) => {
+                                          const modKey = `plan::${subject}::${moduleName}`;
+                                          const isModuleOpen = expandedPlanSubjects[modKey] || false;
+                                          const totalMarks = modTopics.reduce((sum, t) => sum + (parseInt(t.priority) || 0), 0);
+                                          
+                                          // Sort topics inside module by marks
+                                          const sortedTopics = [...modTopics].sort((a, b) => {
+                                            return (parseInt(b.priority) || 0) - (parseInt(a.priority) || 0);
+                                          });
+
+                                          return (
+                                            <div key={modKey} className="rounded-lg overflow-hidden">
+                                              <button onClick={() => setExpandedPlanSubjects(prev => ({ ...prev, [modKey]: !prev[modKey] }))} className="w-full flex items-center gap-2 px-2 py-2 hover:bg-white/5 transition-colors text-left rounded-lg">
+                                                <ChevronRight className={`w-3 h-3 text-white/30 transition-transform ${isModuleOpen ? "rotate-90" : ""}`} />
+                                                <span className="flex-1 text-xs text-white/70 font-medium truncate">{moduleName}</span>
+                                                <div className="flex gap-1">
+                                                  {totalMarks > 0 && <span className="text-[8px] px-1 py-0.5 rounded bg-accent-purple/10 text-accent-purple">{totalMarks} Marks</span>}
+                                                </div>
+                                              </button>
+
+                                              <AnimatePresence>
+                                                {isModuleOpen && (
+                                                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                                                    <div className="pl-6 pr-2 pb-1 space-y-0.5">
+                                                      {sortedTopics.map((topic, idx) => {
+                                                        const marks = parseInt(topic.priority) || 0;
+                                                        return (
+                                                          <div key={topic.id} className="flex items-center gap-1 px-2 py-1 rounded hover:bg-white/5 group">
+                                                            <span className="flex-1 text-[10px] text-white/60 group-hover:text-white/80 truncate">{topic.name}</span>
+                                                            <span className={`text-[8px] px-1 py-0.5 rounded shrink-0 ${marks > 0 ? "bg-accent-purple/10 text-accent-purple" : "bg-white/5 text-white/30"}`}>
+                                                              {marks}M
+                                                            </span>
+                                                          </div>
+                                                        );
+                                                      })}
+                                                    </div>
+                                                  </motion.div>
+                                                )}
+                                              </AnimatePresence>
+                                            </div>
+                                          );
+                                       })}
+                                     </div>
+                                   </motion.div>
+                                 )}
+                               </AnimatePresence>
+                             </div>
+                           );
+                        })}
+                        {!files.some(f => f.file_type !== "syllabus") && (
+                           <div className="text-center p-4">
+                             <p className="text-xs text-white/30">Upload PYQs to see prioritized topics here.</p>
+                           </div>
+                        )}
                       </div>
                     </Card>
                   </div>

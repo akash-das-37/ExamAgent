@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 async function downloadFile(fileUrl: string): Promise<{ base64: string; mimeType: string } | null> {
   try {
@@ -42,13 +37,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
     }
 
+    const authenticatedClient = await createServerSupabaseClient();
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
+      return NextResponse.json({ error: "API key missing" }, { status: 500 });
     }
 
     // 1. Fetch all uploaded PYQ files for this user
-    const { data: pyqFiles } = await supabase
+    const { data: pyqFiles } = await authenticatedClient
       .from("uploaded_files")
       .select("*")
       .eq("user_id", userId)
@@ -61,7 +58,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Fetch current syllabus topics
-    const { data: syllabusTopics } = await supabase
+    const { data: syllabusTopics } = await authenticatedClient
       .from("priority_topics")
       .select("*")
       .eq("user_id", userId);
@@ -71,12 +68,6 @@ export async function POST(request: Request) {
         ui_message: "No syllabus data found. Sync your syllabus first!",
       });
     }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: { responseMimeType: "application/json" },
-    });
 
     // 3. Group PYQs by subject
     const pyqsBySubject: Record<string, typeof pyqFiles> = {};
@@ -90,8 +81,21 @@ export async function POST(request: Request) {
     let totalUpdated = 0;
 
     for (const [subject, subjectPyqs] of Object.entries(pyqsBySubject)) {
-      // Get syllabus topics for this subject
-      const subjectTopics = syllabusTopics.filter(t => t.subject === subject);
+      // Get syllabus topics for this subject using fuzzy matching
+      const subjectTopics = syllabusTopics.filter(t => {
+        const dbSub = (t.subject || "").toLowerCase().trim();
+        const pyqSub = subject.toLowerCase().trim();
+        return dbSub.includes(pyqSub) || pyqSub.includes(dbSub);
+      });
+      
+      try {
+        require("fs").writeFileSync("scratch/debug_topics.json", JSON.stringify({
+          pyqSubject: subject,
+          matchedTopics: subjectTopics.length,
+          allSyllabusTopics: syllabusTopics.map(t => t.subject)
+        }, null, 2));
+      } catch(e) {}
+
       if (subjectTopics.length === 0) continue;
 
       // Download all PYQ files for this subject
@@ -115,40 +119,19 @@ export async function POST(request: Request) {
         currentPriority: t.priority,
       }));
 
-      const prompt = `You are an expert exam preparation analyst. Analyze ALL the past year question papers below for the subject "${subject}".
+      const prompt = `Act as a precision exam analyst. Analyze the attached PDFs.
 
-SYLLABUS TOPICS (these are the topics from the student's syllabus):
-${JSON.stringify(syllabusContext, null, 2)}
+Your Task:
+Read through every single question in the attached exam papers. Match each question to the most relevant topic from the SYLLABUS TOPICS list below. Calculate the TOTAL marks for each topic across all papers.
 
-You have ${fileContents.length} past year papers for this subject. Analyze them carefully and determine:
+Return ONLY a JSON object with an "analysis" array. Each item must have:
+- "id": the exact UUID from the syllabus list
+- "totalMarks": integer sum of marks for that topic (0 if not found)
 
-1. **Repetition**: Which topics appear repeatedly across multiple papers? Topics appearing in 3+ papers = High, 2 papers = Medium, 1 paper = Low.
-2. **Marks Weightage**: Topics that carry higher marks (long answer questions, 10+ marks) get boosted priority.
-3. **Recency**: Topics from more recent papers get a slight priority boost.
+Do NOT include any other fields. Do NOT include evidence or explanations.
 
-For EACH syllabus topic above, assign a priority (High/Medium/Low) based on your analysis.
-
-RULES:
-- Match PYQ questions to the closest syllabus topic by concept/name.
-- A topic repeatedly tested across years with high marks = "High"
-- A topic tested once or with low marks = "Low" 
-- Everything else = "Medium"
-- If a topic never appeared in any PYQ, set it to "Low"
-
-Respond with a JSON object:
-{
-  "analysis": [
-    { 
-      "id": "topic-uuid-from-syllabus", 
-      "name": "topic name",
-      "priority": "High|Medium|Low", 
-      "repetitions": 3,
-      "avgMarks": 10,
-      "reason": "Brief reason" 
-    }
-  ],
-  "summary": "Brief overall analysis summary"
-}`;
+SYLLABUS TOPICS:
+${JSON.stringify(syllabusContext, null, 2)}`;
 
       // Build parts array: all file contents + the prompt
       const parts: any[] = [];
@@ -160,35 +143,90 @@ Respond with a JSON object:
       parts.push({ text: prompt });
 
       try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+          model: "gemini-flash-latest",
+          generationConfig: { 
+            temperature: 0.1,
+            maxOutputTokens: 8192,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: SchemaType.OBJECT,
+              properties: {
+                analysis: {
+                  type: SchemaType.ARRAY,
+                  items: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                      id: { type: SchemaType.STRING },
+                      totalMarks: { type: SchemaType.INTEGER }
+                    },
+                    required: ["id", "totalMarks"]
+                  }
+                }
+              },
+              required: ["analysis"]
+            }
+          }
+        });
+
         const result = await model.generateContent(parts);
         const text = result.response.text();
         let analysis: any;
         try {
           analysis = JSON.parse(text);
-        } catch {
-          const jsonMatch = text.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) continue;
-          analysis = JSON.parse(jsonMatch[0]);
+        } catch (e) {
+          try {
+            require("fs").writeFileSync("scratch/gemini_raw_output.txt", text);
+          } catch(err) {}
+          // Attempt to repair truncated JSON by closing open arrays/objects
+          let repaired = text.trim();
+          // Strip trailing incomplete object entries
+          repaired = repaired.replace(/,\s*\{[^}]*$/, '');
+          // Close any unclosed arrays and objects
+          const openBraces = (repaired.match(/\{/g) || []).length;
+          const closeBraces = (repaired.match(/\}/g) || []).length;
+          const openBrackets = (repaired.match(/\[/g) || []).length;
+          const closeBrackets = (repaired.match(/\]/g) || []).length;
+          for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += ']';
+          for (let i = 0; i < openBraces - closeBraces; i++) repaired += '}';
+          try {
+            analysis = JSON.parse(repaired);
+          } catch (parseErr: any) {
+            throw new Error(`JSON Parse Error: ${parseErr.message}. Raw Text: ${text.substring(0, 500)}...`);
+          }
         }
 
         // 5. Update priority_topics with the analysis results
+        console.log("Gemini Output Analysis:", JSON.stringify(analysis, null, 2));
+        try {
+          require("fs").writeFileSync("scratch/gemini_output.json", JSON.stringify(analysis, null, 2));
+        } catch(e) {}
+
         if (analysis.analysis && Array.isArray(analysis.analysis)) {
           for (const item of analysis.analysis) {
-            if (!item.id || !item.priority) continue;
-            const { error } = await supabase
+            if (!item.id || item.totalMarks === undefined) continue;
+            const { error } = await authenticatedClient
               .from("priority_topics")
               .update({
-                priority: item.priority,
+                priority: item.totalMarks.toString(),
                 updated_at: new Date().toISOString(),
               })
               .eq("id", item.id)
               .eq("user_id", userId);
-            if (!error) totalUpdated++;
+            
+            if (error) {
+              console.error("Supabase update error for topic ID", item.id, ":", error);
+            } else {
+              totalUpdated++;
+            }
           }
         }
       } catch (err: any) {
         console.error(`Error analyzing PYQs for subject ${subject}:`, err.message);
-        // Continue with other subjects even if one fails
+        try {
+          require("fs").writeFileSync("scratch/gemini_error.json", JSON.stringify({ error: err.message, stack: err.stack }, null, 2));
+        } catch(e) {}
       }
     }
 
@@ -196,6 +234,7 @@ Respond with a JSON object:
       next_action: "pyq_brain_complete",
       ui_message: `Brain analysis complete! Updated priorities for ${totalUpdated} topics across ${Object.keys(pyqsBySubject).length} subjects.`,
       updatedCount: totalUpdated,
+      debugOutput: pyqsBySubject
     });
   } catch (error: any) {
     console.error("PYQ Brain Analysis Error:", error);

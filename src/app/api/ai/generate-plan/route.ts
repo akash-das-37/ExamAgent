@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export async function POST(request: Request) {
   try {
+    const authenticatedClient = await createServerSupabaseClient();
     const body = await request.json();
     const { userId, subjects, daysLeft, studyHours } = body;
 
@@ -22,12 +18,12 @@ export async function POST(request: Request) {
     let sessionsContext = "";
 
     if (userId) {
-      const { data: topics } = await supabase
+      const { data: topics } = await authenticatedClient
         .from("priority_topics")
         .select("name, priority, progress, subject")
         .eq("user_id", userId);
 
-      const { data: sessions } = await supabase
+      const { data: sessions } = await authenticatedClient
         .from("study_sessions")
         .select("duration_minutes, difficulty_rating, session_date")
         .eq("user_id", userId)
@@ -43,7 +39,7 @@ export async function POST(request: Request) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
     const prompt = `
       You are an expert academic study planner for technical students. 
@@ -79,7 +75,7 @@ export async function POST(request: Request) {
     if (userId && plan.todaysPlan) {
       // Clear today's existing plan
       const today = new Date().toISOString().split("T")[0];
-      await supabase
+      await authenticatedClient
         .from("study_plan")
         .delete()
         .eq("user_id", userId)
@@ -95,12 +91,12 @@ export async function POST(request: Request) {
         plan_date: today,
       }));
 
-      await supabase.from("study_plan").insert(planItems);
+      await authenticatedClient.from("study_plan").insert(planItems);
 
       // Update priority topics if they don't exist yet
       if (plan.priorityTopics) {
         for (const topic of plan.priorityTopics) {
-          const { data: existing } = await supabase
+          const { data: existing } = await authenticatedClient
             .from("priority_topics")
             .select("id")
             .eq("user_id", userId)
@@ -108,7 +104,7 @@ export async function POST(request: Request) {
             .single();
 
           if (!existing) {
-            await supabase.from("priority_topics").insert({
+            await authenticatedClient.from("priority_topics").insert({
               user_id: userId,
               name: topic.name,
               priority: topic.priority,

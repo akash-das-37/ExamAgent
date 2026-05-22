@@ -114,7 +114,7 @@ export async function POST(req: Request) {
     if (uploadedPdfBase64) {
       // PRIORITY 1: User uploaded their own syllabus file — most accurate source
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         generationConfig: { responseMimeType: "application/json" },
       });
 
@@ -182,7 +182,7 @@ Set priority: "High" for core/frequently tested topics, "Medium" for standard, "
         const pdfUrl = parts[2];
 
         const model = genAI.getGenerativeModel({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           generationConfig: { responseMimeType: "application/json" },
         });
 
@@ -221,7 +221,7 @@ Each module MUST list its individual topics. Set priority based on importance.`,
       } else {
         // HTML text or nothing — use text-based approach
         const model = genAI.getGenerativeModel({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           generationConfig: { responseMimeType: "application/json" },
         });
 

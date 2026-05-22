@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     if (fileData && fileData.base64.length > 0) {
       // ---- ACTUAL FILE CONTENT AVAILABLE ----
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         generationConfig: { responseMimeType: "application/json" },
       });
 
@@ -162,7 +162,7 @@ Assign "High" to frequently tested topics, "Medium" to standard ones, "Low" to r
     } else {
       // ---- FALLBACK: filename-only analysis ----
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         generationConfig: { responseMimeType: "application/json" },
       });
 
