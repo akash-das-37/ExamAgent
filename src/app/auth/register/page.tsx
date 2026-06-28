@@ -56,8 +56,19 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [numErrors, setNumErrors] = useState<{ admissionYear?: string; semester?: string }>({});
+  const [shakeFields, setShakeFields] = useState<{ admissionYear?: boolean; semester?: boolean }>({});
   const router = useRouter();
   const supabase = createClient();
+
+  const handleOAuthLogin = async (provider: 'google' | 'github') => {
+    await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +115,19 @@ export default function RegisterPage() {
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === "admissionYear" || name === "semester") {
+      if (/\D/.test(value)) {
+        setNumErrors(prev => ({ ...prev, [name]: "Only numbers are allowed" }));
+        setShakeFields(prev => ({ ...prev, [name]: true }));
+        setTimeout(() => setShakeFields(prev => ({ ...prev, [name]: false })), 400);
+        setTimeout(() => setNumErrors(prev => ({ ...prev, [name]: undefined })), 2500);
+      }
+      const finalValue = value.replace(/\D/g, "");
+      setFormData(prev => ({ ...prev, [name]: finalValue }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   return (
@@ -203,24 +226,32 @@ export default function RegisterPage() {
               )}
             </AnimatePresence>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Admission Year"
-                name="admissionYear"
-                placeholder="e.g. 2023"
-                type="text"
-                value={formData.admissionYear}
-                onChange={handleChange}
-                required
-              />
-              <Input
-                label="Current Semester"
-                name="semester"
-                placeholder="e.g. 5"
-                type="text"
-                value={formData.semester}
-                onChange={handleChange}
-                required
-              />
+              <motion.div animate={shakeFields.admissionYear ? { x: [-8, 8, -6, 6, -3, 3, 0] } : { x: 0 }} transition={{ duration: 0.35 }}>
+                <Input
+                  label="Admission Year"
+                  name="admissionYear"
+                  placeholder="e.g. 2023"
+                  type="text"
+                  inputMode="numeric"
+                  value={formData.admissionYear}
+                  onChange={handleChange}
+                  error={numErrors.admissionYear}
+                  required
+                />
+              </motion.div>
+              <motion.div animate={shakeFields.semester ? { x: [-8, 8, -6, 6, -3, 3, 0] } : { x: 0 }} transition={{ duration: 0.35 }}>
+                <Input
+                  label="Current Semester"
+                  name="semester"
+                  placeholder="e.g. 5"
+                  type="text"
+                  inputMode="numeric"
+                  value={formData.semester}
+                  onChange={handleChange}
+                  error={numErrors.semester}
+                  required
+                />
+              </motion.div>
             </div>
             <Input
               label="Email Address"
@@ -308,11 +339,11 @@ export default function RegisterPage() {
             </div>
 
             <div className="flex justify-center space-x-4">
-              <Button type="button" variant="secondary" className="flex-1">
+              <Button type="button" variant="secondary" className="flex-1" onClick={() => handleOAuthLogin('github')}>
                 <Github className="w-4 h-4 mr-2" />
                 GitHub
               </Button>
-              <Button type="button" variant="secondary" className="flex-1">
+              <Button type="button" variant="secondary" className="flex-1" onClick={() => handleOAuthLogin('google')}>
                 <Mail className="w-4 h-4 mr-2" />
                 Google
               </Button>

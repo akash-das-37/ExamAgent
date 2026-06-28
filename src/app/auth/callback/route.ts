@@ -27,9 +27,20 @@ export async function GET(request: Request) {
         },
       }
     );
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+    const { data: { user }, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error && user) {
+      // Check if user has completed onboarding profile
+      const { data: profile } = await supabase
+        .from("UserProfile")
+        .select("onboardingDone")
+        .eq("id", user.id)
+        .single();
+
+      if (profile?.onboardingDone) {
+        return NextResponse.redirect(`${origin}${next}`);
+      } else {
+        return NextResponse.redirect(`${origin}/onboarding`);
+      }
     }
   }
 

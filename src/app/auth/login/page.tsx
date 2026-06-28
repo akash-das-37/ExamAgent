@@ -153,11 +153,11 @@ export default function LoginPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <Button type="button" variant="secondary" className="w-full py-2">
+              <Button type="button" variant="secondary" className="w-full py-2" onClick={() => handleOAuthLogin('github')}>
                 <Github className="w-4 h-4 mr-2" />
                 GitHub
               </Button>
-              <Button type="button" variant="secondary" className="w-full py-2">
+              <Button type="button" variant="secondary" className="w-full py-2" onClick={() => handleOAuthLogin('google')}>
                 <Mail className="w-4 h-4 mr-2" />
                 Google
               </Button>
